@@ -1,4 +1,4 @@
-def gameScrape(gameId,season, *cleand):
+def game_scrape(gameId,season, *cleand):
     from bs4 import BeautifulSoup
     from lxml import html
     import requests
