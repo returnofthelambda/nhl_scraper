@@ -11,10 +11,18 @@ def game_scrape(game_id, season):
         data = json.loads(url.read().decode())
 
     all_plays=data['liveData']['plays']['allPlays']
-    play_data=json_normalize(all_plays) # need to flatten out the json string
+
+    for play_num in range(len(all_plays)):
+        for key in list(all_plays[play_num].keys()):
+            if (type(all_plays[play_num][key])==list):
+                for i in range(len(all_plays[play_num][key])):
+                    all_plays[play_num][key+'.'+str(i)]=all_plays[play_num][key][i]
+                del all_plays[play_num][key]
+
+    play_data=json_normalize(all_plays)
     play_data['gameId']=game_id
     play_data['season']=season
-    
+
     skaters, goalies=players_scrape(data['liveData']['boxscore']['teams'])
     skaters['game_id']=game_id
     goalies['game_id']=game_id
@@ -25,7 +33,7 @@ def players_scrape(players_json):
     player.'''
 
     import pandas as pd
-    
+
     tmp_dict={}
     tmp_dict['goalieStats']={}
     tmp_dict['skaterStats']={}
@@ -36,7 +44,7 @@ def players_scrape(players_json):
             for playerType in ['skaterStats','goalieStats']:
                 if playerType in tmp_stats[p]['stats']:
                     tmp_dict[playerType].update({p[2:] : tmp_stats[p]['stats'][playerType]})
-    
+
     skaters_df=pd.DataFrame(tmp_dict['skaterStats']).T
     goalies_df=pd.DataFrame(tmp_dict['goalieStats']).T
 
