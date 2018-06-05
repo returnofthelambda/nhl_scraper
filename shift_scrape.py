@@ -1,15 +1,15 @@
 def game_scrape(gameId,season, *cleand):
     from bs4 import BeautifulSoup
-    from lxml import html
-    import requests
-    import re
+    #import re
     from urllib.request import urlopen
-    import pandas as pd
+    #import pandas as pd
     
     try:
         cleand[0]
     except IndexError:
         cleand=[["gameId","skater","shift","period","shiftStart","shiftEnd"]]
+
+    season=str(season)+str(int(season)+1)
     
     for team in ['H','V']:
 
@@ -43,6 +43,3 @@ def game_scrape(gameId,season, *cleand):
             i+=jump
 
     return cleand
-
-#def seasonScrape(season):
-    
