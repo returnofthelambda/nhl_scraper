@@ -22,7 +22,7 @@ def game_scrape(season, game_id):
                 del all_plays[play_num][key]
 
     play_data=json_normalize(all_plays)
-    play_data['gameId']=game_id
+    play_data['game_id']=game_id
     play_data['season']=season
 
     skaters, goalies=players_scrape(data['liveData']['boxscore']['teams'])
@@ -37,18 +37,18 @@ def players_scrape(players_json):
     import pandas as pd
 
     tmp_dict={}
-    tmp_dict['goalieStats']={}
-    tmp_dict['skaterStats']={}
+    tmp_dict['goalie_stats']={}
+    tmp_dict['skater_stats']={}
     for team in ['home','away']:
         players=list(players_json[team]['players'].keys())
         tmp_stats=players_json[team]['players']
         for p in players:
-            for playerType in ['skaterStats','goalieStats']:
-                if playerType in tmp_stats[p]['stats']:
-                    tmp_dict[playerType].update({p[2:] : tmp_stats[p]['stats'][playerType]})
+            for player_type in ['skater_stats','goalie_stats']:
+                if player_type in tmp_stats[p]['stats']:
+                    tmp_dict[player_type].update({p[2:] : tmp_stats[p]['stats'][player_type]})
 
-    skaters_df=pd.DataFrame(tmp_dict['skaterStats']).T
-    goalies_df=pd.DataFrame(tmp_dict['goalieStats']).T
+    skaters_df=pd.DataFrame(tmp_dict['skater_stats']).T
+    goalies_df=pd.DataFrame(tmp_dict['goalie_stats']).T
 
     return skaters_df, goalies_df
 
@@ -66,14 +66,21 @@ def season_scrape(season):
     import pandas as pd
 
 
+    '''include test for whether season exists in database. must be prior to 2017 (though there's
+    probably a better way to test for current season) and 1917 or after. 
 
-    max_games = 1270 if int(season) > 2016 else 1230
+    '''
+
+
+    max_games = 1271 if int(season) > 2016 else 1230
     for i in range(max_games):
         game_id = "02" + "%04d" % int(i+1)
         try:
             urllib.request.urlopen('http://statsapi.web.nhl.com/api/v1/game/'+str(season)+game_id+'/feed/live')
         except:
+            print("unable to find: " + str(season) + "" + str(game_id))
             continue
+        print("scraping game " + str(season) + "" + str(game_id))
         play_df_tmp, skaters_tmp, goalies_tmp = game_scrape(str(season),game_id)
         if 'play_df' in locals():
             play_df = play_df.append(play_df_tmp,ignore_index=True)
