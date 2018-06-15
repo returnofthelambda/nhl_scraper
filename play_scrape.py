@@ -25,10 +25,10 @@ def game_scrape(season, game_id):
     play_data['game_id']=game_id
     play_data['season']=season
 
-    skaters, goalies=players_scrape(data['liveData']['boxscore']['teams'])
-    skaters['game_id']=game_id
-    goalies['game_id']=game_id
-    return play_data, skaters, goalies
+    skaters_df, goalies_df=players_scrape(data['liveData']['boxscore']['teams'])
+    skaters_df['game_id']=game_id
+    goalies_df['game_id']=game_id
+    return play_data, skaters_df, goalies_df
 
 def players_scrape(players_json):
     '''take the data['liveData']['boxscore']['teams'] json string and parse game data for each
@@ -37,20 +37,23 @@ def players_scrape(players_json):
     import pandas as pd
 
     tmp_dict={}
-    tmp_dict['goalie_stats']={}
-    tmp_dict['skater_stats']={}
+    '''have to leave the next two variables in its casing'''
+    tmp_dict['goalieStats']={}
+    tmp_dict['skaterStats']={}
     for team in ['home','away']:
         players=list(players_json[team]['players'].keys())
         tmp_stats=players_json[team]['players']
         for p in players:
-            for player_type in ['skater_stats','goalie_stats']:
+            for player_type in ['skaterStats','goalieStats']:
                 if player_type in tmp_stats[p]['stats']:
                     tmp_dict[player_type].update({p[2:] : tmp_stats[p]['stats'][player_type]})
 
-    skaters_df=pd.DataFrame(tmp_dict['skater_stats']).T
-    goalies_df=pd.DataFrame(tmp_dict['goalie_stats']).T
+    skaters_df=pd.DataFrame(tmp_dict['skaterStats'])
+    skaters_df.index.name='skater_id'
+    goalies_df=pd.DataFrame(tmp_dict['goalieStats'])
+    goalies_df.index.name='goalie_id'
 
-    return skaters_df, goalies_df
+    return skaters_df.T, goalies_df.T
 
 
 def season_scrape(season):
@@ -72,7 +75,7 @@ def season_scrape(season):
     '''
 
 
-    max_games = 1271 if int(season) > 2016 else 1230
+    max_games = 71 if int(season) > 2016 else 30
     for i in range(max_games):
         game_id = "02" + "%04d" % int(i+1)
         try:
@@ -90,6 +93,10 @@ def season_scrape(season):
             play_df = play_df_tmp
             skaters_df = skaters_tmp
             goalies_df = goalies_tmp
+
+    removal = ['Game Scheduled', 'Period Ready', 'Shootout Complete', 'Period Official', 'Game Official']
+    play_df=play_df.loc[~play_df['result.event'].isin(removal)]
+    play_df.drop(['about.periodTimeRemaining','about.ordinalNum','team.link','team.name','team.triCode'],axis=1,inplace=True)
 
 
     return play_df, skaters_df, goalies_df
