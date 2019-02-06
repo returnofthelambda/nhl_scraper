@@ -75,7 +75,7 @@ def season_scrape(season):
     '''
 
 
-    max_games = 71 if int(season) > 2016 else 30
+    max_games = 1271 if int(season) > 2016 else 30
     for i in range(max_games):
         game_id = "02" + "%04d" % int(i+1)
         try:
