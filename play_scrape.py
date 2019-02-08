@@ -1,5 +1,4 @@
-def game_scrape(season, game_id):
-    '''take game# and season and use that to pull json from web
+def game_scrape(season, game_id): '''take game# and season and use that to pull json from web
     likely will split this off into it's own function and then move the parsing into a
     separate function.
     
