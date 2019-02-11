@@ -52,7 +52,7 @@ def summary_scrape(gameId,season):
                     res[i].append('')
 
     if len(res)==1:
-        return 'No goals scored, game in progress.'
+        return pd.DataFrame('No goals scored, game in progress.',columns='Err')
     res[0][-2]='Visitor_On_Ice'
     res[0][-1]='Home_On_Ice'
     df=pd.DataFrame(res[1:],columns=res[0])
@@ -112,7 +112,8 @@ def season_summary_scrape(season):
                 continue
         print("scraping game " + str(season) + "" + str(gameId))
         df_tmp=summary_scrape(gameId,season)
-        if df_tmp=='No goals scored, game in progress.':
+        if df_tmp.columns[0]=='Err':
+            print(df_tmp.Err.iloc[0])
             continue
         else:
             if 'game_summary_df' in locals():
