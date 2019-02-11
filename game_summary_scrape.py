@@ -63,14 +63,12 @@ def summary_scrape(gameId,season):
     df['Home_Goalie_On_Ice']=df['Home_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[1]) if x is not None else True)
     df['Visitor']=teams[0]
     df['Home']=teams[1]
-    diff=[1]
     if df.Team.iloc[0]==teams[0]:
         home=[0]
         visitor=[1]
     else:
         visitor=[0]
         home=[1]
-
     for i in range(1,len(df.Team)):
             if df.Team.iloc[i]==teams[0]:
                 visitor.append(visitor[i-1]+1)
@@ -81,7 +79,7 @@ def summary_scrape(gameId,season):
     df['Visitor_Score']=visitor
     df['Home_Score']=home
     diff=df.Visitor_Score-df.Home_Score
-    diff=[ diff[i]*-1 if df.Team==team[1] else diff[i] for i in range(len(df.Team)) ]
+    diff=[ diff[i]*-1 if df.Team.iloc[i]==teams[1] else diff[i] for i in range(len(df.Team)) ]
     df['Difference']=diff
 
     return df
@@ -116,10 +114,11 @@ def season_summary_scrape(season):
         df_tmp=summary_scrape(gameId,season)
         if df_tmp=='No goals scored, game in progress.':
             continue
-        elif 'game_summary_df' in locals():
-            game_summary_df=game_summary_df.append(df_tmp,ignore_index=True)
         else:
-            game_summary_df=df_tmp
+            if 'game_summary_df' in locals():
+                game_summary_df=game_summary_df.append(df_tmp,ignore_index=True)
+            else:
+                game_summary_df=df_tmp
 
     return game_summary_df
 
