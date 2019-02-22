@@ -55,8 +55,7 @@ def summary_scrape(gameId,season):
         return pd.DataFrame('No goals scored, game in progress.',columns='Err')
     res[0][-2:]=['Visitor_On_Ice','Home_On_Ice']
     df=pd.DataFrame(res[1:],columns=res[0])
-    df['Season']=season[:4]
-    df['gameId']=gameId
+    df['Season'],df['gameId']=[season[:4],gameId]
 
     df['Visitor_Goalie_On_Ice']=df['Visitor_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[0]) if x is not None else True)
     df['Home_Goalie_On_Ice']=df['Home_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[1]) if x is not None else True)
@@ -67,15 +66,14 @@ def summary_scrape(gameId,season):
     score=[ [1,0] if df.Team.iloc[0]==teams[0] else [0,1] ]
 
     for i in range(1,len(df.Team)):
-            if df.Team.iloc[i]==teams[0]:
-                score.append([visitor[i-1]+1,home[i-1])
-            else:
-                score.append([visitor[i-1],home[i-1]+1])
 
-    df.merge(pd.DataFrame(score,colummns=['Visitor_Score','Home_Score'],inplace=True)
-    diff=df.Visitor_Score-df.Home_Score
-    diff=[ diff[i]*-1 if df.Team.iloc[i]==teams[1] else diff[i] for i in range(len(df.Team)) ]
-    df['Difference']=diff
+            if df.Team.iloc[i]==teams[0]:
+                score.append([score[-1][0]+1,score[-1][1]])
+            else:
+                score.append([score[-1][0],score[-1][1]+1])
+
+    df.merge(pd.DataFrame(score,colummns=['Visitor_Score','Home_Score'],inplace=True))
+    df['Difference']=[ df.Home_Score[ei]-df.Visitor_Score[ei] if df.Team[ei]==teams[1] else df.Visitor_Score[ei]-df.Home_Score[ei] for ei in df.index ]
 
     return df
 
@@ -119,26 +117,30 @@ def season_summary_scrape(season):
     return game_summary_df
 
 
-def gs():
+def for_against(df):
     '''
-    Just a small debugging script.
+    Takes in a df created above and formats it to show goals for vs against.
     '''
-    from bs4 import BeautifulSoup
-    from urllib.request import urlopen
     import pandas as pd
 
-    url='http://www.nhl.com/scores/htmlreports/20182019/GS020851.HTM'
-    try:
-        raw_html = urlopen(url).read()
-        bsObj=BeautifulSoup(raw_html,"html.parser")
-        goals=bsObj.find_all("td")[28]
-        res=[[] for _ in range(len(goals.find_all("tr")))]
-        for i in range(len(res)):
-            for j in range(len(goals.find_all('tr')[i].find_all('td'))):
-                val=goals.find_all('tr')[i].find_all('td')[j].text.strip().split(', ')
+    joined=pd.concat([df[['Team','G']].groupby(['Team']).agg('count'),df[['Against','G']].groupby(['Against']).agg('count')],ignore_index=False,sort=True,axis=1)
+    joined.columns=['For','Against']
+    joined['Difference']=joined.For-joined.Against
 
-        #   print("game currently in progress and no goals scored")
-    except:
-        print("does not exist")
+    return joined.sort_values('Difference',ascending=False)
 
-    return res
+def players(df):
+    '''
+    Takes in a df created above and formats it to show goals and assists for all players included in the database.
+    '''
+
+    import pandas as pd
+
+    joined=pd.concat([df[['Goal Scorer','G']].groupby(['Goal Scorer']).agg('count'),df[['Assist','G']].groupby(['Assist']).agg('count'),df[['Assist.1','G']].groupby(['Assist.1']).agg('count')],ignore_index=False,sort=True,axis=1)
+    joined.columns=['Goals','Assist.1','Assist.2']
+    joined.fillna(0,inplace=True)
+    joined=joined.astype(int)
+    joined['Points']=joined.sum(axis=1)
+    joined['Primary_Points']=joined[['Goals','Assist.1']].sum(axis=1)
+
+    return joined.sort_values('Points',ascending=False)
