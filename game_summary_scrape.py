@@ -13,6 +13,7 @@ def summary_scrape(gameId,season):
     from bs4 import BeautifulSoup
     from urllib.request import urlopen
     import pandas as pd
+    from numpy import cumsum
 
     season=str(season)+str(int(season)+1)
 
@@ -63,16 +64,9 @@ def summary_scrape(gameId,season):
     df['Visitor']=teams[0]
     df['Home']=teams[1]
 
-    score=[ [1,0] if df.Team.iloc[0]==teams[0] else [0,1] ]
+    df['Visitor_Score']=list(cumsum([ 1 if df.loc[ei,'Team']==teams[0] else 0 for ei in df.index]))
+    df['Home_Score']=list(cumsum([ 1 if df.loc[ei,'Team']==teams[1] else 0 for ei in df.index]))
 
-    for i in range(1,len(df.Team)):
-
-            if df.Team.iloc[i]==teams[0]:
-                score.append([score[-1][0]+1,score[-1][1]])
-            else:
-                score.append([score[-1][0],score[-1][1]+1])
-
-    df.merge(pd.DataFrame(score,colummns=['Visitor_Score','Home_Score'],inplace=True))
     df['Difference']=[ df.Home_Score[ei]-df.Visitor_Score[ei] if df.Team[ei]==teams[1] else df.Visitor_Score[ei]-df.Home_Score[ei] for ei in df.index ]
 
     return df
