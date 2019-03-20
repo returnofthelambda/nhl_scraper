@@ -1,37 +1,40 @@
-def summary_scrape(gameId,season):
+def summary_scrape(season,gameId,subSeason='02'):
     '''
-    Script that scrapes goals scored data from NHL Game Summary pages. Requires full 6 digit gameId and 4 digit season (eg 2018 for the 2018-19 season). Eventually 6 digit code will be broken into a 2 digit code (01 preseason, 02 regular, 03 playoffs) and a 4 digit gameId. 
+    Script that scrapes goals scored data from NHL Game Summary pages. Requires 4 digit season (eg 2018 for the 2018-19 season), 4 digit gameId and 2 digit sub season (01 preseason, 02 regular, 03 playoffs). 
 
     This script returns a dataframe that contains all information in the Goal Summary section and augments it with a few extra bits of info:
-        #1: Whether or not the home or away goalies were on the ice. Instead of cross checkinga separate database, the test is done from the data provided on the Game Summary Page. Test can handle any amount of goalies, though I believe there has never been an instance where a team had more than 2 goalies dressed in a game.
-        #2: Who the goal was scored against.
-        #3: How that goal impacted the score, from the pesrpective of the scoring team. This tidbit will allow me to easier suss out what 3rd period goals without a goalie on the ice are the result of gambling for an extra attacker and how many of those goals are from delayed penalties. Given the limitation of the data, this likely will not be 100% accurate as it's almost certain that at some point a team that was trailing has scored a late goal while on a delayed penalty.
-
-    2019-02-10 Unresolved Issues:
-        #1: Prior to 2014, Montreal Game Summary pages were written in English and in French, this throws an error as currently constructed.
+        #1: Whether or not the home or away goalies were on the ice. Instead of cross checking a separate database, the test is done from the data provided on the Game Summary Page. Test can handle any amount of goalies (typically 2 per team).
+        #2: Which team the goal was scored against.
+        #3: How that goal impacted the score, from the pesrpective of the scoring team. This is to make it easier suss out what 3rd period goals without a goalie on the ice are the result of gambling for an extra attacker vs how many of those goals are from delayed penalties.
     '''
     from bs4 import BeautifulSoup
     from urllib.request import urlopen
     import pandas as pd
     from numpy import cumsum
 
-    season=str(season)+str(int(season)+1)
+    if len(str(season))==4:
+        season=str(season)+str(int(season)+1)
 
-    url='http://www.nhl.com/scores/htmlreports/'+season+'/GS'+str(gameId)+'.HTM'
+    url='http://www.nhl.com/scores/htmlreports/'+season+'/GS'+str(subSeason)+str(gameId).zfill(4)+'.HTM'
+    #url='http://www.nhl.com/scores/htmlreports/20132014/GS020001.HTM'
     raw_html = urlopen(url).read()
     bsObj=BeautifulSoup(raw_html,"html.parser")
-    if bsObj.find_all("td")[17].text != 'Final':
-        return pd.DataFrame('Game in progress.',columns='Err')
+    tds=bsObj.find_all("td")
 
-    goals=bsObj.find_all("td")[28]
+    #Because season_summary_scrape requires a DataFrame, this is the way errors will be handled.
+    for fin in range(len(tds)):
+        if tds[fin].text=='Final':
+            break
+        if fin==len(tds)-1:
+            return pd.DataFrame(['Game in progress.'],columns=['Err'])
 
-    #I don't think the visitor/home full names are necessary, but keep for now.
-    #visitor=[str(bsObj.find_all("td")[37].text)[:3],bsObj.find_all("img")[0].get('alt','')]
-    #home=[str(bsObj.find_all("td")[38].text)[:3],bsObj.find_all("img")[1].get('alt','')]
+    date=pd.to_datetime(tds[fin-4].text).strftime("%Y-%m-%d")
+    time=pd.to_datetime(tds[fin-2].text.split('\xa0')[1]).strftime('%H:%M')
+    goals=tds[fin+11]
 
     #list of team abbrevs, visitor first
-    teams=[str(bsObj.find_all("td")[37].text)[:3],str(bsObj.find_all("td")[38].text)[:3]]
-    #test to make sure there are only 4 goalies on the game summary sheet:
+    teams=[str(tds[fin+20].text)[:3],str(tds[fin+21].text)[:3]]
+
     goalies=[[],[]]
     goalie_start=bsObj.find("td",{"valign":"middle"}).find_parent("tr").find_next_siblings("tr")
     j=0
@@ -43,11 +46,12 @@ def summary_scrape(gameId,season):
             if res[:4]=='TEAM':
                 i+=3
                 j=1
-    res=[[] for _ in range(len(goals.find_all("tr")))]
+    #create empty list of lists for each row in Goal summary
+    res=[[] for _ in range(1,len(goals.find_all("tr")))]
 
     for i in range(len(res)):
-        for j in range(len(goals.find_all('tr')[i].find_all('td'))):
-            val=goals.find_all('tr')[i].find_all('td')[j].text.strip().split(', ')
+        for j in range(len(goals.find_all('tr')[i+1].find_all('td'))):
+            val=goals.find_all('tr')[i+1].find_all('td')[j].text.strip().split(', ')
             if len(val)>1:
                 res[i].append(val)
             else:
@@ -56,30 +60,31 @@ def summary_scrape(gameId,season):
                     res[i].append('')
 
 
-
-    res[0][5:]=['Scorer','Assist.1','Assist.2','Visitor_On_Ice','Home_On_Ice']
-    df=pd.DataFrame(res[1:],columns=res[0])
-    df['Scorer']=df['Scorer'].str.replace('\(\d+\)|\d+', '')
-    df['Assist.1']=df['Assist.1'].str.replace('\(\d+\)|\d+', '')
-    df['Assist.2']=df['Assist.2'].str.replace('\(\d+\)|\d+', '')
-    df['Season'],df['gameId']=[season[:4],gameId]
+    cols=['G','Per','Time','Str','Team','Scorer','Assist.1','Assist.2','Visitor_On_Ice','Home_On_Ice']
+    df=pd.DataFrame(res,columns=cols)
+    #strip out numbers that are included with players names to denote season total of Goals / Assists
+    for col in ['Scorer','Assist.1','Assist.2']:
+        df[col]=df[col].str.replace('\(\d+\)|\d+', '')
+    #drop rows that contain unsuccessful penalty shots
+    df=df[df['Assist.1']!='Unsuccessful Penalty Shot']
+    df['Season'],df['gameId'],df['Date'],df['Start']=[season[:4],str(subSeason)+str(gameId).zfill(4),date,time]
 
     df['Visitor_Goalie_On_Ice']=df['Visitor_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[0]) if x is not None else True)
     df['Home_Goalie_On_Ice']=df['Home_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[1]) if x is not None else True)
 
-    df['Visitor']=teams[0]
-    df['Home']=teams[1]
+    df['Visitor'], df['Home']=[teams[0],teams[1]]
 
     df['Visitor_Score']=list(cumsum([ 1 if df.loc[ei,'Team']==teams[0] else 0 for ei in df.index]))
     df['Home_Score']=list(cumsum([ 1 if df.loc[ei,'Team']==teams[1] else 0 for ei in df.index]))
 
     df['Difference']=[ df.Home_Score[ei]-df.Visitor_Score[ei] if df.Team[ei]==teams[1] else df.Visitor_Score[ei]-df.Home_Score[ei] for ei in df.index ]
 
-    df['Time']=pd.to_datetime(df.Time,format='%M:%S').dt.time
+    #coerce errors since SO goals don't occur at a time
+    df['Time']=pd.to_datetime(df.Time,format='%M:%S',errors='coerce').dt.time
 
     return df
 
-def season_summary_scrape(season,start=0):
+def season_summary_scrape(season,start=0,subSeason='02'):
     '''
     User provides season number and optionally the starting game, and returns a dataframe of summary data for all games from start to final game of the season. Start defaults to 0 if no input is provided by the user.
     The reason I set the loop to not break until two consecutive games are empty is because if a game is postponed for any reason (weather, etc) the NHL keeps that gameId number for the postponed game, and often those games are made up at the end of the season. If two consecutive games are ever postponed (and I'm sure at some point that will happen) I will have to revisit how to handle this.
@@ -97,18 +102,18 @@ def season_summary_scrape(season,start=0):
     max_games = 1271 if int(season) > 2016 else 1230
     failed=0
     for i in range(start,max_games):
-        gameId = "02" + "%04d" % int(i+1)
+        gameId = "%04d" % int(i+1)
         try:
-            urlopen('http://www.nhl.com/scores/htmlreports/'+str(season)+str(season+1)+'/GS'+gameId+'.HTM')
+            urlopen('http://www.nhl.com/scores/htmlreports/'+str(season)+str(int(season)+1)+'/GS'+str(subSeason).zfill(2)+gameId+'.HTM')
         except:
-            print("unable to find: " + str(season) + "" + str(gameId))
+            print("unable to find: " + str(season) + str(subSeason) + str(gameId))
             if int(gameId)==int(failed)+1:
                 break
             else:
                 failed=int(gameId)
                 continue
-        print("scraping game " + str(season) + "" + str(gameId))
-        df_tmp=summary_scrape(gameId,season)
+        print("scraping game " + str(season) + str(subSeason) + str(gameId))
+        df_tmp=summary_scrape(str(season),gameId,subSeason)
         if df_tmp.columns[0]=='Err':
             print(df_tmp.Err.iloc[0])
             continue
@@ -173,32 +178,37 @@ def delayed_penalty(df):
 
 def for_against_plot(df):
     import matplotlib.pyplot as plt
-    import pandas as pd
+    from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+    import os
 
-    tc_df=color_scrape()
+    def getImage(path,zoom=.5):
+        return OffsetImage(plt.imread(path),zoom=zoom)
+    #tc_df=color_scrape()
+    #tc_df=pd.read_csv('nhl_team_colors.csv',index_col='Abbrev')
 
 
-    df_merged=df.merge(tc_df,left_index=True,right_index=True)
+    #df_merged=df.merge(tc_df,left_index=True,right_index=True)
 
-    fig=plt.figure()
-    ax1=fig.add_subplot(121)
-    max=df_merged.For.max() or df_merged.Against.max()
-    ax1.set_xlim([df_merged.Against.min()-2,df_merged.Against.max()+2]) #max+2])
-    ax1.set_ylim([df_merged.For.min()-2,df_merged.For.max()+2]) #max+2])
+    fig,ax1=plt.subplots()#figsize=(125,36))
+    ax1.set_xlim(auto=True)
+
+    max=df.For.max() or df.Against.max()
+    ax1.set_xlim([df.Against.min()-2,max+2])
+    ax1.set_ylim([df.For.min()-2,max+2])
     ax1.set_aspect(1)
-    ax1.scatter(df_merged.Against,df_merged.For,color='blue',s=10,edgecolor='none')
+    ax1.scatter(df.Against,df.For,color=df.Main,s=50,edgecolor=df.Accent)
     ax1.plot(range(max+5),color='black',linewidth=0.2)
 
-    ax1.plot(df_merged.For.mean(),df_merged.For.mean(),'--')
+    ax1.set_xlabel('Goals Allowed')
+    ax1.set_ylabel('Gaols Scored')
+    plt.title('Extra Attacker Goals Scored / Allowed in the NHL Since 2014-2015 Season')
 
-    for ei in df_merged.index:
-        ax1.annotate(ei, 
-                     xy=(df_merged.Against.loc[ei], df_merged.For.loc[ei]),
-                     xytext=(-20,20),
-                     textcoords='offset points',
-                     bbox=dict(boxstyle='round,pad=0.5',fc=df_merged.Main.loc[ei].strip(' '),ec=df_merged.Accent.loc[ei]),
-                     arrowprops=dict(arrowstyle = '->', connectionstyle='arc3,rad=0'),
-                     color=df_merged.Text.loc[ei])
+    artists=[]
+    
+    paths=[os.path.join(os.getcwd(),'logos',df.Logos[i]) for i in range(len(df.Logos))]
+    for diff,x0,y0,path in zip(df.Difference,df.Against,df.For,paths):
+        ab=AnnotationBbox(getImage(path),(x0,y0), frameon=False)
+        artists.append(ax1.add_artist(ab))
 
     return plt.show()
 
@@ -222,17 +232,25 @@ def color_scrape():
 
 def bar_plot(df):
     import matplotlib.pyplot as plt
-    tc=color_scrape()
-    df_merged=df.merge(tc,left_index=True,right_index=True)
-    fig,ax=plt.subplots(figsize=(175,76))
-    ax.set_xlim(auto=True)
-    ax.set_ylim([df_merged.Difference.min()-2,df_merged.Difference.max()+2])
-    ax.bar(height=df_merged.Difference,x=list(range(1,32)),color=df_merged.Main,width=0.7)
+    import pandas as pd
 
-    for rect, label in zip(ax.patches,df_merged.index):
-        if rect.get_height() < 0:
-            ax.text(rect.get_x()+rect.get_width() / 2, rect.get_height()-0.5, label, ha='center',va='top')
+    #tc=pd.read_csv('nhl_team_colors.csv',index_col='Abbrev')# or color_scrape()
+    #df_merged=df.merge(tc,left_index=True,right_index=True)
+    fig,ax=plt.subplots()#figsize=(125,36))
+    plt.title('Net Extra Attacker Goals Scored in the NHL Since 2014-2015 Season')
+    ax.set_xlim([df.Difference.min()-2,df.Difference.max()+2])
+    ax.set_yticklabels([])
+    ax.set_yticks([])
+    ax.barh(width=df.Difference,y=list(range(1,32)),color=df.Main,height=0.7)
+
+    ax.set_xlim(auto=True)
+    ax.set_ylim(auto=True)
+
+    for rect, label in zip(ax.patches,df.index):
+        color=df.Accent.loc[label]
+        if rect.get_width() < 0:
+            ax.text(rect.get_width()-0.2, rect.get_y(), label, ha='right',va='bottom',color=color)
         else:
-            ax.text(rect.get_x()+rect.get_width() / 2, rect.get_height()+0.5, label, ha='center',va='bottom')
+            ax.text(rect.get_width()+0.2, rect.get_y(), label, ha='left',va='bottom',color=color)
 
     return plt.show()
