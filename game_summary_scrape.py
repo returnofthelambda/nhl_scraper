@@ -32,19 +32,20 @@ def summary_scrape(season,gameId,subSeason='02'):
     goals=tds[fin+11]
 
     #list of team abbrevs, visitor first
-    teams=[str(tds[fin+20].text)[:3],str(tds[fin+21].text)[:3]]
+    teams={'Visitor':str(tds[fin+20].text)[:3],'Home':str(tds[fin+21].text)[:3]}
 
-    goalies=[[],[]]
+    tmp=[[],[]]
     goalieStart=bsObj.find('td',{'valign':'middle'}).find_parent('tr').find_next_siblings('tr')
     j=0
     for i in range(1,len(goalieStart)):
         res=goalieStart[i].find('td').text
         try:
-            goalies[j].append(int(res))
+            tmp[j].append(int(res))
         except:
             if res[:4]=='TEAM':
                 i+=3
                 j=1
+    goalies={'Visitor':tmp[0],'Home':tmp[1]}
     #create empty list of lists for each row in Goal summary
     res=[[] for _ in range(1,len(goals.find_all('tr')))]
 
@@ -68,19 +69,17 @@ def summary_scrape(season,gameId,subSeason='02'):
     df=df[df['Assist.1']!='Unsuccessful Penalty Shot']
     df['Season'],df['gameId']=[season[:4],str(str(subSeason)+str(gameId).zfill(4)).zfill(6)]
 
-    i=0
     for team in ['Visitor','Home']:
-        df[team+'_Goalie_On_Ice']=df[team+'_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[i]) if x is not None else True)
-        df[team+'_Score']=cumsum([ 1 if df.loc[ei,'Team']==teams[i] else 0 for ei in df.index])
-        i=1
+        df[team+'_Goalie_On_Ice']=df[team+'_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[team]) if x is not None else True)
+        df[team+'_Score']=cumsum([ 1 if df.loc[ei,'Team']==teams[team] else 0 for ei in df.index])
 
-    df['Difference']=[ df.Home_Score[ei]-df.Visitor_Score[ei] if df.Team[ei]==teams[1] else df.Visitor_Score[ei]-df.Home_Score[ei] for ei in df.index ]
+    df['Difference']=[ df.Home_Score[ei]-df.Visitor_Score[ei] if df.Team[ei]==teams['Home'] else df.Visitor_Score[ei]-df.Home_Score[ei] for ei in df.index ]
 
     #coerce errors since SO goals don't occur at a time
     df['Time']=pd.to_datetime(df.Time,format='%M:%S',errors='coerce').dt.time
 
 
-    df_meta=pd.DataFrame([[season[:4],str(subSeason)+str(gameId).zfill(4),date,startTime,teams[0],teams[1]]],columns=['Season','gameId','Date','Start','Visitor','Home'])
+    df_meta=pd.DataFrame([[season[:4],str(subSeason)+str(gameId).zfill(4),date,startTime,teams['Visitor'],teams['Home']]],columns=['Season','gameId','Date','Start','Visitor','Home'])
 
     return df.set_index(['Season','gameId']),df_meta.set_index(['Season','gameId'])
 
