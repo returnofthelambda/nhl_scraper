@@ -1,12 +1,12 @@
 def summary_scrape(season,gameId,subSeason='02'):
-    '''
+    """
     Script that scrapes goals scored data from NHL Game Summary pages. Requires 4 digit season (eg 2018 for the 2018-19 season), 4 digit gameId and 2 digit sub season (01 preseason, 02 regular, 03 playoffs). 
 
     This script returns a dataframe that contains all information in the Goal Summary section and augments it with a few extra bits of info:
         #1: Whether or not the home or away goalies were on the ice. Instead of cross checking a separate database, the test is done from the data provided on the Game Summary Page. Test can handle any amount of goalies (typically 2 per team).
         #2: Which team the goal was scored against.
         #3: How that goal impacted the score, from the pesrpective of the scoring team. This is to make it easier suss out what 3rd period goals without a goalie on the ice are the result of gambling for an extra attacker vs how many of those goals are from delayed penalties.
-    '''
+    """
     from bs4 import BeautifulSoup
     from urllib.request import urlopen
     import pandas as pd
@@ -15,31 +15,30 @@ def summary_scrape(season,gameId,subSeason='02'):
     if len(str(season))==4:
         season=str(season)+str(int(season)+1)
 
-    url='http://www.nhl.com/scores/htmlreports/'+season+'/GS'+str(subSeason)+str(gameId).zfill(4)+'.HTM'
+    url='http://www.nhl.com/scores/htmlreports/'+season+'/GS'+str(subSeason).zfill(2)+str(gameId).zfill(4)+'.HTM'
     #url='http://www.nhl.com/scores/htmlreports/20132014/GS020001.HTM'
     raw_html = urlopen(url).read()
-    bsObj=BeautifulSoup(raw_html,"html.parser")
-    tds=bsObj.find_all("td")
+    bsObj=BeautifulSoup(raw_html,'html.parser')
+    tds=bsObj.find_all('td')
 
-    #Because season_summary_scrape requires a DataFrame, this is the way errors will be handled.
     for fin in range(len(tds)):
         if tds[fin].text=='Final':
             break
         if fin==len(tds)-1:
-            return pd.DataFrame(['Game in progress.'],columns=['Err'])
+            return pd.DataFrame(['Game in progress.'],columns=['Err']),pd.DataFrame([])
 
-    date=pd.to_datetime(tds[fin-4].text).strftime("%Y-%m-%d")
-    time=pd.to_datetime(tds[fin-2].text.split('\xa0')[1]).strftime('%H:%M')
+    date=pd.to_datetime(tds[fin-4].text).strftime('%Y-%m-%d')
+    startTime=pd.to_datetime(tds[fin-2].text.split('\xa0')[1]).strftime('%H:%M')
     goals=tds[fin+11]
 
     #list of team abbrevs, visitor first
     teams=[str(tds[fin+20].text)[:3],str(tds[fin+21].text)[:3]]
 
     goalies=[[],[]]
-    goalie_start=bsObj.find("td",{"valign":"middle"}).find_parent("tr").find_next_siblings("tr")
+    goalieStart=bsObj.find('td',{'valign':'middle'}).find_parent('tr').find_next_siblings('tr')
     j=0
-    for i in range(1,len(goalie_start)):
-        res=goalie_start[i].find('td').text
+    for i in range(1,len(goalieStart)):
+        res=goalieStart[i].find('td').text
         try:
             goalies[j].append(int(res))
         except:
@@ -47,7 +46,7 @@ def summary_scrape(season,gameId,subSeason='02'):
                 i+=3
                 j=1
     #create empty list of lists for each row in Goal summary
-    res=[[] for _ in range(1,len(goals.find_all("tr")))]
+    res=[[] for _ in range(1,len(goals.find_all('tr')))]
 
     for i in range(len(res)):
         for j in range(len(goals.find_all('tr')[i+1].find_all('td'))):
@@ -63,73 +62,84 @@ def summary_scrape(season,gameId,subSeason='02'):
     cols=['G','Per','Time','Str','Team','Scorer','Assist.1','Assist.2','Visitor_On_Ice','Home_On_Ice']
     df=pd.DataFrame(res,columns=cols)
     #strip out numbers that are included with players names to denote season total of Goals / Assists
-    for col in ['Scorer','Assist.1','Assist.2']:
+    for col in cols[5:8]:
         df[col]=df[col].str.replace('\(\d+\)|\d+', '')
     #drop rows that contain unsuccessful penalty shots
     df=df[df['Assist.1']!='Unsuccessful Penalty Shot']
-    df['Season'],df['gameId'],df['Date'],df['Start']=[season[:4],str(subSeason)+str(gameId).zfill(4),date,time]
+    df['Season'],df['gameId']=[season[:4],str(str(subSeason)+str(gameId).zfill(4)).zfill(6)]
 
-    df['Visitor_Goalie_On_Ice']=df['Visitor_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[0]) if x is not None else True)
-    df['Home_Goalie_On_Ice']=df['Home_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[1]) if x is not None else True)
-
-    df['Visitor'], df['Home']=[teams[0],teams[1]]
-
-    df['Visitor_Score']=list(cumsum([ 1 if df.loc[ei,'Team']==teams[0] else 0 for ei in df.index]))
-    df['Home_Score']=list(cumsum([ 1 if df.loc[ei,'Team']==teams[1] else 0 for ei in df.index]))
+    i=0
+    for team in ['Visitor','Home']:
+        df[team+'_Goalie_On_Ice']=df[team+'_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[i]) if x is not None else True)
+        df[team+'_Score']=cumsum([ 1 if df.loc[ei,'Team']==teams[i] else 0 for ei in df.index])
+        i=1
 
     df['Difference']=[ df.Home_Score[ei]-df.Visitor_Score[ei] if df.Team[ei]==teams[1] else df.Visitor_Score[ei]-df.Home_Score[ei] for ei in df.index ]
 
     #coerce errors since SO goals don't occur at a time
     df['Time']=pd.to_datetime(df.Time,format='%M:%S',errors='coerce').dt.time
 
-    return df
+
+    df_meta=pd.DataFrame([[season[:4],str(subSeason)+str(gameId).zfill(4),date,startTime,teams[0],teams[1]]],columns=['Season','gameId','Date','Start','Visitor','Home'])
+
+    return df.set_index(['Season','gameId']),df_meta.set_index(['Season','gameId'])
 
 def season_summary_scrape(season,start=0,subSeason='02'):
-    '''
+    """
     User provides season number and optionally the starting game, and returns a dataframe of summary data for all games from start to final game of the season. Start defaults to 0 if no input is provided by the user.
     The reason I set the loop to not break until two consecutive games are empty is because if a game is postponed for any reason (weather, etc) the NHL keeps that gameId number for the postponed game, and often those games are made up at the end of the season. If two consecutive games are ever postponed (and I'm sure at some point that will happen) I will have to revisit how to handle this.
 
-    '''
+    """
     from urllib.request import urlopen
     import pandas as pd
+    from datetime import datetime
 
 
-    '''include test for whether season exists in database. must be prior to 2017 (though there's  probably a better way to test for current season) and 1917 or after.
+    """include test for whether season exists in database. must be prior to 2017 (though there's  probably a better way to test for current season) and 1917 or after.
 
-    '''
+    """
 
 
-    max_games = 1271 if int(season) > 2016 else 1230
+    max_games = 1291 #if int(season) > 2016 else 1230
     failed=0
+    skipped=[]
     for i in range(start,max_games):
-        gameId = "%04d" % int(i+1)
+        gameId = '%04d' % int(i+1)
         try:
             urlopen('http://www.nhl.com/scores/htmlreports/'+str(season)+str(int(season)+1)+'/GS'+str(subSeason).zfill(2)+gameId+'.HTM')
         except:
-            print("unable to find: " + str(season) + str(subSeason) + str(gameId))
+            skipped.append([season,str(subSeason)+str(gameId),datetime.fromtimestamp(datetime.timestamp(datetime.now())).strftime('%Y-%m-%d %H:%M:%S')])
+            print('unable to find: ' + str(season) + str(subSeason) + str(gameId))
             if int(gameId)==int(failed)+1:
                 break
             else:
                 failed=int(gameId)
                 continue
-        print("scraping game " + str(season) + str(subSeason) + str(gameId))
-        df_tmp=summary_scrape(str(season),gameId,subSeason)
+        print('scraping game ' + str(season) + str(subSeason) + str(gameId))
+        df_tmp,df_meta=summary_scrape(str(season),gameId,subSeason)
         if df_tmp.columns[0]=='Err':
             print(df_tmp.Err.iloc[0])
             continue
         else:
             if 'game_summary_df' in locals():
-                game_summary_df=game_summary_df.append(df_tmp,ignore_index=True)
+                game_summary_df=game_summary_df.append(df_tmp,ignore_index=False)
+                gs_meta_df=gs_meta_df.append(df_meta,ignore_index=False)
             else:
                 game_summary_df=df_tmp
+                gs_meta_df=df_meta
+    if len(skipped)>2:
+        pd.DataFrame(skipped[:-2],columns=['Season','gameId','Time Failed']).to_csv('skipped_'+str(season)+'.csv',index=False)
 
-    return game_summary_df
+    game_summary_df.to_csv('ss_'+str(season)+'-'+str(int(season+1))+'.csv',index=True)
+    gs_meta_df.to_csv('ss_'+str(season)+'-'+str(int(season+1))+'_meta.csv',index=True)
+
+    return game_summary_df,gs_meta_df
 
 
 def for_against(df):
-    '''
+    """
     Takes in a df created above and formats it to show goals for vs against.
-    '''
+    """
     import pandas as pd
 
     against=[df.Home.loc[ei] if df.Team.loc[ei] == df.Visitor.loc[ei] else df.Visitor.loc[ei] for ei in df.index]  
@@ -143,11 +153,11 @@ def for_against(df):
     return joined.sort_values('Difference',ascending=True)
 
 def players(df):
-    '''
+    """
     ***ISSUE: DUE TO WAY NHL LISTS PLAYERS ON GAME SUMMARY SHEET, THIS IS USELESS IN IT'S CURRENT FORM. ANY PLAYERS WITH SAME FIRST INITIAL AND LAST NAME WILL GET GROUPED TOGETHER - eg JAMIE AND JORDY BENN. CAN'T LEAVE JERSEY # IN PLACE, BECAUSE PLAYERS CHANGE #'s FROM TIME TO TIME. NEED TO LOOK INTO MAKING DATABASE FROM PBP DATA AND MERGE ON PER/TIME/GAMEID/SEASON TO UPDATE SCORER/ASSIST.1/ASSIST.2 NAMES TO PLAYERS FULL NAMES.***
 
     Takes in a df created above and formats it to show goals and assists for all players included in the database.
-    '''
+    """
 
     import pandas as pd
 
