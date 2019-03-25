@@ -11,6 +11,7 @@ def summary_scrape(season,gameId,subSeason='02'):
     from urllib.request import urlopen
     import pandas as pd
     from numpy import cumsum
+    import os
 
     if len(str(season))==4:
         season=str(season)+str(int(season)+1)
@@ -64,10 +65,19 @@ def summary_scrape(season,gameId,subSeason='02'):
     df=pd.DataFrame(res,columns=cols)
     #strip out numbers that are included with players names to denote season total of Goals / Assists
     for col in cols[5:8]:
-        df[col]=df[col].str.replace('\(\d+\)|\d+', '')
+        df[col]=df[col].str.replace('\(\d+\)|\d+', '').str.strip()
+    df['Season'],df['gameId']=[season[:4],str(str(subSeason)+str(gameId).zfill(4)).zfill(6)]
+    if any(df['Assist.1'].str.contains('Unsuccessful Penalty Shot')):
+        try:
+            p_df=pd.read_csv('csv/failed_ps_'+str(int(season))+'.csv',dtype={'gameId':'str'})
+            p_df=pd.concat([p_df,df[df['Assist.1']=='Unsuccessful Penalty Shot'].drop(['Visitor_On_Ice','Home_On_Ice'],axis=1)],sort=False).drop_duplicates()
+        except:
+            p_df=df[df['Assist.1']=='Unsuccessful Penalty Shot'].drop(['Visitor_On_Ice','Home_On_Ice'],axis=1)
+
+        p_df.set_index(['Season','gameId']).to_csv('csv/failed_ps_'+str(int(season))+'.csv',index=True)
+
     #drop rows that contain unsuccessful penalty shots
     df=df[df['Assist.1']!='Unsuccessful Penalty Shot']
-    df['Season'],df['gameId']=[season[:4],str(str(subSeason)+str(gameId).zfill(4)).zfill(6)]
 
     for team in ['Visitor','Home']:
         df[team+'_Goalie_On_Ice']=df[team+'_On_Ice'].apply(lambda x: any(str(g) in x for g in goalies[team]) if x is not None else True)
@@ -83,7 +93,7 @@ def summary_scrape(season,gameId,subSeason='02'):
 
     return df.set_index(['Season','gameId']),df_meta.set_index(['Season','gameId'])
 
-def season_summary_scrape(season,start=0,subSeason='02'):
+def season_summary_scrape(season,start=0,subSeason='02',autosave=True):
     """
     User provides season number and optionally the starting game, and returns a dataframe of summary data for all games from start to final game of the season. Start defaults to 0 if no input is provided by the user.
     The reason I set the loop to not break until two consecutive games are empty is because if a game is postponed for any reason (weather, etc) the NHL keeps that gameId number for the postponed game, and often those games are made up at the end of the season. If two consecutive games are ever postponed (and I'm sure at some point that will happen) I will have to revisit how to handle this.
@@ -107,7 +117,7 @@ def season_summary_scrape(season,start=0,subSeason='02'):
         try:
             urlopen('http://www.nhl.com/scores/htmlreports/'+str(season)+str(int(season)+1)+'/GS'+str(subSeason).zfill(2)+gameId+'.HTM')
         except:
-            skipped.append([season,str(subSeason)+str(gameId),datetime.fromtimestamp(datetime.timestamp(datetime.now())).strftime('%Y-%m-%d %H:%M:%S')])
+            skipped.append([season,str(subSeason)+str(gameId),'DNE',datetime.fromtimestamp(datetime.timestamp(datetime.now())).strftime('%Y-%m-%d %H:%M:%S')])
             print('unable to find: ' + str(season) + str(subSeason) + str(gameId))
             if int(gameId)==int(failed)+1:
                 break
@@ -118,6 +128,7 @@ def season_summary_scrape(season,start=0,subSeason='02'):
         df_tmp,df_meta=summary_scrape(str(season),gameId,subSeason)
         if df_tmp.columns[0]=='Err':
             print(df_tmp.Err.iloc[0])
+            skipped.append([season,str(subSeason)+str(gameId),'In Progress / Missing',datetime.fromtimestamp(datetime.timestamp(datetime.now())).strftime('%Y-%m-%d %H:%M:%S')])
             continue
         else:
             if 'game_summary_df' in locals():
@@ -127,12 +138,31 @@ def season_summary_scrape(season,start=0,subSeason='02'):
                 game_summary_df=df_tmp
                 gs_meta_df=df_meta
     if len(skipped)>2:
-        pd.DataFrame(skipped[:-2],columns=['Season','gameId','Time Failed']).to_csv('skipped_'+str(season)+'.csv',index=False)
+        pd.DataFrame(skipped[:-2],columns=['Season','gameId','Reason','Time Failed']).to_csv('skipped_'+str(season)+'.csv',index=False)
 
-    game_summary_df.to_csv('ss_'+str(season)+'-'+str(int(season+1))+'.csv',index=True)
-    gs_meta_df.to_csv('ss_'+str(season)+'-'+str(int(season+1))+'_meta.csv',index=True)
+    while type(autosave)!=bool:
+        text=input('Would you like to save to csv (Y/n)? ')
+        if text[0].upper()=='Y':
+            autosave=True
+        elif text[0].upper()=='N':
+            autosave=False
+        else:
+            print('Please enter Y/n.')
+    if autosave:
+        game_summary_df.to_csv('ss_'+str(season)+str(int(season+1))+'.csv',index=True)
+        gs_meta_df.to_csv('ss_'+str(season)+str(int(season+1))+'_meta.csv',index=True)
 
     return game_summary_df,gs_meta_df
+
+def ss_df_import(season=2009):
+    import pandas as pd
+
+    df=pd.read_csv('csv\ss_'+str(season)+str(season+1)+'.csv',dtype={'gameId':'str'}).set_index(['Season','gameId'])
+
+    for szn in range(season+1,2019):
+        df=pd.concat([df,pd.read_csv('csv\ss_'+str(szn)+str(szn+1)+'.csv',dtype={'gameId':'str'}).set_index(['Season','gameId'])],sort=False)
+
+    return df
 
 
 def for_against(df):
