@@ -96,7 +96,7 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
 
     return df.set_index(['Season','gameId']),df_meta.set_index(['Season','gameId'])
 
-def season_summary_scrape(season,start=1,subSeason='02',autosave=True):
+def season_summary_scrape(season,start=1,subSeason='02',autosave=False):
     """
     User provides season number and optionally the starting game, and returns a dataframe of summary data for all games from start to final game of the season. Start defaults to 0 if no input is provided by the user.
     The reason I set the loop to not break until two consecutive games are empty is because if a game is postponed for any reason (weather, etc) the NHL keeps that gameId number for the postponed game, and often those games are made up at the end of the season. If two consecutive games are ever postponed (and I'm sure at some point that will happen) I will have to revisit how to handle this.
@@ -152,7 +152,7 @@ def season_summary_scrape(season,start=1,subSeason='02',autosave=True):
             season_gs_meta_df=season_gs_meta_df.append(df_meta,ignore_index=False)
         i+=1
 
-    if len(skipped)>2:
+    if (len(skipped)>2) & autosave:
         pd.DataFrame(skipped[:-2],columns=['Season','gameId','Reason','Time Failed']).to_csv('skipped_'+str(season)+'.csv',index=False)
 
     if autosave:
@@ -171,3 +171,62 @@ def ss_df_import(season=2008):
         dfm=dfm.append(pd.read_csv('csv\ss_'+str(szn)+str(szn+1)+'_meta.csv',dtype={'gameId':'str'}).set_index(['Season','gameId']),sort=False)
 
     return df,dfm
+
+def sss1(season,start=1,subSeason='02',*autosave):
+    """
+    User provides season number and optionally the starting game, and returns a dataframe of summary data for all games from start to final game of the season. Start defaults to 0 if no input is provided by the user.
+    The reason I set the loop to not break until two consecutive games are empty is because if a game is postponed for any reason (weather, etc) the NHL keeps that gameId number for the postponed game, and often those games are made up at the end of the season. If two consecutive games are ever postponed (and I'm sure at some point that will happen) I will have to revisit how to handle this.
+
+    """
+    from urllib.request import urlopen
+    import pandas as pd
+    from datetime import datetime
+
+
+    """include test for whether season exists in database. must be prior to 2017 (though there's  probably a better way to test for current season) and 1917 or after.
+
+    """
+    def autosave_check():
+        text=input('Would you like to save to csv (Y/n)? ')[0]
+        if (text.upper()=='Y') | (text.upper()=='N'):
+            return text.upper() == 'Y'
+        else:
+            print('Please enter Y/n.')
+            return autosave_check()
+
+    autosave = autosave_check()
+
+    gId=str(season)+str(int(season)+1)+str(subSeason).zfill(2)+str(start).zfill(4 )if len(str(season))==4 else str(season)+str(subSeason).zfill(2)+str(start).zfill(4)
+
+    def gss(gId,gs_df,gs_meta_df,skipped,failed):
+        try:
+            raw_html=urlopen('http://www.nhl.com/scores/htmlreports/'+gId[:8]+'/GS'+gId[-6:]+'.HTM')
+        except:
+            print('Unable to find: ' + str(gId)[:4] + str(gId)[-6:])
+            if gId==str(int(failed)+1):
+                if (skipped.shape[0]>2) & (autosave):
+                    skipped.columns=['Season','gameId','Reason','Time Failed']
+                    skipped.to_csv('skipped_'+gId[:8]+'.csv',index=False)
+                return gs_df,gs_meta_df
+            else:
+                return gss(str(int(gId)+1),gs_df,gs_meta_df,skipped.append(pd.DataFrame([gId[:8],gId[-6:],'DNE',datetime.fromtimestamp(datetime.timestamp(datetime.now())).strftime('%Y-%m-%d %H:%M:%S')]).T),gId)
+        print('Scraping game ' + gId[:4]+gId[8:])
+        df_tmp,df_meta=summary_scrape(gId[:4],gId[-4:],gId[8:10],raw_html)
+        if df_tmp.columns[0]=='Err':
+            print(df_tmp.Err.iloc[0])
+            if gId==str(int(failed)+1):
+                return gs_df,gs_meta_df
+            else:
+                return gss(str(int(gId)+1),gs_df,gs_meta_df,skipped.append(pd.DataFrame([gId[:8],gId[8:],'In Progress',datetime.fromtimestamp(datetime.timestamp(datetime.now())).strftime('%Y-%m-%d %H:%M:%S')]).T),gId)
+        else:
+            return gss(str(int(gId)+1),gs_df.append(df_tmp,ignore_index=False),gs_meta_df.append(df_meta,ignore_index=False),skipped,failed)
+
+    season_gs_df,season_gs_meta_df=gss(gId,pd.DataFrame(),pd.DataFrame(),pd.DataFrame(),0)
+
+    if autosave:
+        gs_df.to_csv('ss_'+str(gId)[:8]+'.csv',index=True)
+        gs_meta_df.to_csv('ss_'+str(gId)[:8]+'_meta.csv',index=True)
+
+    return season_gs_df,season_gs_meta_df
+
+
