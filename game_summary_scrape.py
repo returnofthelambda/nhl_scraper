@@ -100,16 +100,11 @@ def season_summary_scrape(season,start=1,subSeason='02',autosave=False):
     """
     User provides season number and optionally the starting game, and returns a dataframe of summary data for all games from start to final game of the season. Start defaults to 0 if no input is provided by the user.
     The reason I set the loop to not break until two consecutive games are empty is because if a game is postponed for any reason (weather, etc) the NHL keeps that gameId number for the postponed game, and often those games are made up at the end of the season. If two consecutive games are ever postponed (and I'm sure at some point that will happen) I will have to revisit how to handle this.
-
     """
+
     from urllib.request import urlopen
     import pandas as pd
     from datetime import datetime
-
-
-    """include test for whether season exists in database. must be prior to 2017 (though there's  probably a better way to test for current season) and 1917 or after.
-
-    """
 
     while type(autosave)!=bool:
         text=input('Would you like to save to csv (Y/n)? ')
@@ -119,7 +114,6 @@ def season_summary_scrape(season,start=1,subSeason='02',autosave=False):
             autosave=False
         else:
             print('Please enter Y/n.')
-
 
     if len(str(season))==4:
         season=str(season)+str(int(season)+1)
@@ -174,18 +168,12 @@ def ss_df_import(season=2008):
 
 def sss1(season,start=1,subSeason='02',*autosave):
     """
-    User provides season number and optionally the starting game, and returns a dataframe of summary data for all games from start to final game of the season. Start defaults to 0 if no input is provided by the user.
-    The reason I set the loop to not break until two consecutive games are empty is because if a game is postponed for any reason (weather, etc) the NHL keeps that gameId number for the postponed game, and often those games are made up at the end of the season. If two consecutive games are ever postponed (and I'm sure at some point that will happen) I will have to revisit how to handle this.
-
+    Function that is similar to the season_summary_scrape function above, but replaces loops with recursive functions.
     """
     from urllib.request import urlopen
     import pandas as pd
     from datetime import datetime
 
-
-    """include test for whether season exists in database. must be prior to 2017 (though there's  probably a better way to test for current season) and 1917 or after.
-
-    """
     def autosave_check():
         text=input('Would you like to save to csv (Y/n)? ')[0]
         if (text.upper()=='Y') | (text.upper()=='N'):
@@ -224,9 +212,7 @@ def sss1(season,start=1,subSeason='02',*autosave):
     season_gs_df,season_gs_meta_df=gss(gId,pd.DataFrame(),pd.DataFrame(),pd.DataFrame(),0)
 
     if autosave:
-        gs_df.to_csv('ss_'+str(gId)[:8]+'.csv',index=True)
-        gs_meta_df.to_csv('ss_'+str(gId)[:8]+'_meta.csv',index=True)
+        season_gs_df.to_csv('ss_'+str(gId)[:8]+'.csv',index=True)
+        season_gs_meta_df.to_csv('ss_'+str(gId)[:8]+'_meta.csv',index=True)
 
     return season_gs_df,season_gs_meta_df
-
-
