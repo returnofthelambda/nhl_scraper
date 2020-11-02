@@ -96,20 +96,20 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
                                   str(str(subSeason) +
                                       str(gameId).zfill(4)).zfill(6)]
     if any(df['Assist.1'].str.contains('Unsuccessful Penalty Shot')):
-        try:
-            p_df = pd.read_csv('csv/failed_ps_' + str(int(season)) +
-                               '.csv', dtype={'gameId': 'str'})
+        if 'csv' not in os.listdir():
+            os.mkdir('csv')
+        ps_file = 'failed_ps_' + str(int(season)) + '.csv'
+        if ps_file in os.listdir('csv/'):
+            p_df = pd.read_csv('csv/' + ps_file, dtype={'gameId': 'str'})
             p_df = pd.concat([p_df, df[df[
                 'Assist.1'] == 'Unsuccessful Penalty Shot'].drop([
                     'Visitor_On_Ice', 'Home_On_Ice'], axis=1)], sort=False)\
                 .drop_duplicates()
-        except:
-            os.mkdir('csv')
+        else:
             p_df = df[df['Assist.1'] == 'Unsuccessful Penalty Shot']\
                 .drop(['Visitor_On_Ice', 'Home_On_Ice'], axis=1)
-        p_df.set_index(['Season', 'gameId']).to_csv('csv/failed_ps_' +
-                                                    str(int(season)) +
-                                                    '.csv', index=True)
+        p_df.set_index(['Season', 'gameId']).to_csv('csv/' + ps_file,
+                                                    index=True)
     # drop rows that contain unsuccessful penalty shots
     df = df[df['Assist.1'] != 'Unsuccessful Penalty Shot']
 
