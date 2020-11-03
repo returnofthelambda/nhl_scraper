@@ -139,14 +139,8 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
     return df.set_index(['Season', 'gameId']), df_meta.set_index(['Season',
                                                                   'gameId'])
 
-def season_summary_scrape(season,start=1,subSeason='02',autosave=False):
+def season_summary_scrape(season,start=1,subSeason='02',*autosave):
     """
-    Update, 2020-11-01: 2018-19 post season game numbering changed to groupings
-    by series so series 1 was CBJ vs TB and it was number 0111. All games in
-    that series start 011X. 2019-2020 playoffs went back to the normal 0001 for
-    the first game of the playoffs. Will work to update this to handle the
-    2018-2019 playoffs, but for no it's not functional for that post-season.
-
     User provides season number and optionally the starting game, and returns a
     dataframe of summary data for all games from start to final game of the
     season. Start defaults to 0 if no input is provided by the user.
@@ -170,42 +164,50 @@ def season_summary_scrape(season,start=1,subSeason='02',autosave=False):
     if len(str(season)) == 4:
         season = str(season) + str(int(season) + 1)
 
-    failed = 0
+    failed = -1
     skipped = []
     season_gs_df, season_gs_meta_df = pd.DataFrame(), pd.DataFrame()
     i = int(start)
     while True:
-        gameId = '%04d' % i
+        # gameId = '%04d' % i
         try:
+            game_id = str(subSeason).zfill(2) + '%04d' % i
             raw_html = urlopen('http://www.nhl.com/scores/htmlreports/' +
-                                str(season) + '/GS' +
-                                str(subSeason).zfill(2) + gameId + '.HTM')
+                                str(season) + '/GS' + game_id + '.HTM')
         except:
-            skipped.append([season, str(subSeason) + str(gameId), 'DNE',
+            skipped.append([season, game_id, 'DNE',
                             datetime.fromtimestamp(
                                 datetime.timestamp(
                                     datetime.now())).strftime(
                                         '%Y-%m-%d %H:%M:%S')])
-            print('Unable to find: ' + str(season[:4]) + str(subSeason) +
-                  str(gameId))
+            print('Unable to find:', str(season[:4]) + game_id)
             if i == failed + 1:
-                break
+                if (game_id[1] == '3') & (int(game_id[3]) < 5):
+                    # increment to next hundreds place
+                    i = (int(i/100)+1) * 100 + 11
+                    failed = i - 1
+                    continue
+                else:
+                    break
             else:
+                if game_id[:2] == '03':
+                    if i < 111:
+                        i = 110
+                    else:
+                        # increment to next tens place
+                        i = (int(i/10) + 1) * 10
                 failed = i
                 i += 1
                 continue
-        print('Scraping game ' + str(season[:4]) + str(subSeason) +
-              str(gameId))
-
+        print('Scraping game ' + str(season[:4]) + game_id)
         with open('last_game', 'w') as f:
-            f.write(str(season[:4]) + str(subSeason) + str(gameId))
+            f.write(str(season[:4]) + game_id)
             f.close()
-        df_tmp, df_meta = summary_scrape(str(season), gameId, subSeason,
-                                         raw_html)
+            df_tmp, df_meta = summary_scrape(str(season), game_id[2:],
+                                             subSeason, raw_html)
         if df_tmp.columns[0] == 'Err':
             print(df_tmp.Err.iloc[0])
-            skipped.append([season, str(subSeason) + str(gameId),
-                            'In Progress / Missing',
+            skipped.append([season, game_id, 'In Progress / Missing',
                             datetime.fromtimestamp(datetime.timestamp(
                                 datetime.now())).strftime(
                                     '%Y-%m-%d %H:%M:%S')])
@@ -214,7 +216,7 @@ def season_summary_scrape(season,start=1,subSeason='02',autosave=False):
         else:
             season_gs_df = season_gs_df.append(df_tmp, ignore_index=False)
             season_gs_meta_df = season_gs_meta_df.append(df_meta,
-                                                        ignore_index=False)
+                                                         ignore_index=False)
             i += 1
     if (len(skipped) > 2) & autosave:
         pd.DataFrame(skipped[:-2], columns=['Season', 'gameId', 'Reason',
