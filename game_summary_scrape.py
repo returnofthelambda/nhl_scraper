@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from urllib.request import urlopen
+from urllib.request import urlopen, HTTPError
 from numpy import cumsum
 from bs4 import BeautifulSoup
 import pandas as pd
@@ -25,39 +25,45 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
         attacker vs how many of those goals are from delayed penalties.
         """
 
+    meta = {}
     if len(str(season)) == 4:
-        season = str(season) + str(int(season)+1)
+        meta['Season'] = str(season) + str(int(season)+1)
+    else:
+        meta['Season'] = str(season)
 
     if ~('raw_html' in locals()):
-        url = 'http://www.nhl.com/scores/htmlreports/' + season + '/GS' +\
-            str(subSeason).zfill(2) + str(gameId).zfill(4) + '.HTM'
+        meta['gameId'] = str(subSeason).zfill(2) + str(gameId).zfill(4)
+        url = 'http://www.nhl.com/scores/htmlreports/' + meta['Season'] +\
+            '/GS' + meta['gameId'] + '.HTM'
         # url='http://www.nhl.com/scores/htmlreports/20132014/GS020001.HTM'
         try:
             raw_html = urlopen(url)
-        except:
-            return pd.DataFrame(['Game not found.'], columns=['Err']),
-        pd.DataFrame([])
+        except HTTPError:
+            return pd.DataFrame(['Game not found.'], columns=['Err']),\
+                pd.DataFrame()
         bs_obj = BeautifulSoup(raw_html.read().decode('utf-8'), 'html.parser')
         tds = bs_obj.find_all('td')
 
-    for fin in range(len(tds)):
-        if tds[fin].text == 'Final':
-            break
-        if fin == len(tds)-1:
-            return pd.DataFrame(['Game in progress.'], columns=['Err']),
+    times = tds[15].text.split('\xa0')
 
-    pd.DataFrame([])
-    date = pd.to_datetime(tds[fin-4].text).strftime('%Y-%m-%d')
-    start_time = pd.to_datetime(tds[fin-2].text.split('\xa0')[1])\
-        .strftime('%H:%M')
-    goals = tds[fin+11]
+    try:
+        meta['End'] = pd.to_datetime(times[3]).strftime('%H:%M')
+    except IndexError:
+        return pd.DataFrame(['Game in progress.'], columns=['Err']),\
+            pd.DataFrame()
+
+    season[:4], str(subSeason) + str(gameId).zfill(4)
+    meta['Date'] = pd.to_datetime(tds[13].text).strftime('%Y-%m-%d'),
+    meta['Start'] = pd.to_datetime(times[1]).strftime('%H:%M')
+    goals = tds[28]
     # list of team abbrevs, visitor first
-    teams = {'Visitor': str(tds[fin+20].text)[:3],
-             'Home': str(tds[fin+21].text)[:3]}
+    meta['Visitor'] = str(tds[37].text)[:3]
+    meta['Home'] = str(tds[38].text)[:3]
 
     tmp = [[], []]
     goalie_start = bs_obj.find('td', {'valign': 'middle'}).find_parent('tr')\
         .find_next_siblings('tr')
+
     j = 0
     for i in range(1, len(goalie_start)):
         res = goalie_start[i].find('td').text
@@ -92,13 +98,11 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
     for col in cols[5:8]:
         df[col] = df[col].str.replace(r'\(\d+\)|\d+', '').str.strip()
 
-    df['Season'], df['gameId'] = [season[:4],
-                                  str(str(subSeason) +
-                                      str(gameId).zfill(4)).zfill(6)]
+    df['Season'], df['gameId'] = [meta['Season'], meta['gameId']]
     if any(df['Assist.1'].str.contains('Unsuccessful Penalty Shot')):
         if 'csv' not in os.listdir():
             os.mkdir('csv')
-        ps_file = 'failed_ps_' + str(int(season)) + '.csv'
+        ps_file = 'failed_ps_' + meta['Season'] + '.csv'
         if ps_file in os.listdir('csv/'):
             p_df = pd.read_csv('csv/' + ps_file, dtype={'gameId': 'str'})
             p_df = pd.concat([p_df, df[df[
@@ -117,11 +121,11 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
         df[team + '_Goalie_On_Ice'] = df[team + '_On_Ice']\
             .apply(lambda x: any(str(g) in x for g in goalies[team])
                    if x is not None else True)
-        df[team+'_Score'] = cumsum([1 if df.loc[ei, 'Team'] == teams[team]
+        df[team+'_Score'] = cumsum([1 if df.loc[ei, 'Team'] == meta[team]
                                     else 0 for ei in df.index])
 
     df['Difference'] = [df.Home_Score[ei] - df.Visitor_Score[ei]
-                        if df.Team[ei] == teams['Home']
+                        if df.Team[ei] == meta['Home']
                         else df.Visitor_Score[ei] - df.Home_Score[ei]
                         for ei in df.index]
 
@@ -129,12 +133,7 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
     df['Time'] = pd.to_datetime(df.Time, format='%M:%S',
                                 errors='coerce').dt.time
 
-
-    df_meta = pd.DataFrame([[season[:4], str(subSeason) +
-                             str(gameId).zfill(4), date, start_time,
-                             teams['Visitor'], teams['Home']]],
-                           columns=['Season', 'gameId', 'Date', 'Start',
-                                    'Visitor', 'Home'])
+    df_meta = pd.DataFrame(meta)
 
     return df.set_index(['Season', 'gameId']), df_meta.set_index(['Season',
                                                                   'gameId'])
@@ -200,10 +199,8 @@ def season_summary_scrape(season,start=1,subSeason='02',*autosave):
                 i += 1
                 continue
         print('Scraping game ' + str(season[:4]) + game_id)
-        with open('last_game', 'w') as f:
-            f.write(str(season[:4]) + game_id)
-            f.close()
-            df_tmp, df_meta = summary_scrape(str(season), game_id[2:],
+
+        df_tmp, df_meta = summary_scrape(str(season), game_id[2:],
                                              subSeason, raw_html)
         if df_tmp.columns[0] == 'Err':
             print(df_tmp.Err.iloc[0])
@@ -289,9 +286,6 @@ def sss1(season,start=1,subSeason='02',*autosave):
                                     datetime.now())).strftime(
                                         '%Y-%m-%d %H:%M:%S')]).T), gId)
         print('Scraping game ' + gId[:4] + gId[8:])
-        with open('last_game', 'w') as f:
-            f.write(str(gId[:4]) + str(gId[8:]))
-            f.close()
 
         df_tmp, df_meta = summary_scrape(gId[:4], gId[-4:], gId[8:10],
                                          raw_html)
