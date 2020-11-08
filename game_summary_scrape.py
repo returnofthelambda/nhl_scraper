@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from urllib.request import urlopen, HTTPError
-from numpy import cumsum
+import numpy as np
 from bs4 import BeautifulSoup
 import pandas as pd
 
@@ -52,45 +52,30 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
         return pd.DataFrame(['Game in progress.'], columns=['Err']),\
             pd.DataFrame()
 
-    season[:4], str(subSeason) + str(gameId).zfill(4)
     meta['Date'] = pd.to_datetime(tds[13].text).strftime('%Y-%m-%d'),
     meta['Start'] = pd.to_datetime(times[1]).strftime('%H:%M')
-    goals = tds[28]
     # list of team abbrevs, visitor first
     meta['Visitor'] = str(tds[37].text)[:3]
     meta['Home'] = str(tds[38].text)[:3]
 
-    tmp = [[], []]
-    goalie_start = bs_obj.find('td', {'valign': 'middle'}).find_parent('tr')\
+    # find goalie info and use it to extract goalie numbers
+    goalie_info = bs_obj.find('td', {'valign': 'middle'}).find_parent('tr')\
         .find_next_siblings('tr')
+    team = 'Visitor'
+    goalies = {'Visitor': [], 'Home': []}
+    for line in goalie_info:
+        for val in line.find('td'):
+            if val.isnumeric():
+                goalies[team].append(val)
+            if val[:2] == 'TE':
+                team = 'Home'
 
-    j = 0
-    for i in range(1, len(goalie_start)):
-        res = goalie_start[i].find('td').text
-        try:
-            tmp[j].append(int(res))
-        except:
-            if res[:4] == 'TEAM':
-                i += 3
-                j = 1
-                goalies = {'Visitor': tmp[0], 'Home': tmp[1]}
-                # create empty list of lists for each row in Goal summary
-                res = [[] for _ in range(1, len(goals.find_all('tr')))]
-
-    for i in range(len(res)):
-        for j in range(len(goals.find_all('tr')[i+1].find_all('td'))):
-            val = goals.find_all('tr')[i+1].find_all('td')[j].text.strip()\
-                .split(', ')
-            if len(val) > 1:
-                res[i].append(val)
-            else:
-                res[i].append(val[0])
-                if val[0] == 'Penalty Shot':
-                    res[i].append('')
+    goals = [val.text.strip() for val in tds[28].find_all('td')[10:]]
 
     cols = ['G', 'Per', 'Time', 'Str', 'Team', 'Scorer', 'Assist.1',
             'Assist.2', 'Visitor_On_Ice', 'Home_On_Ice']
-    df = pd.DataFrame(res, columns=cols)
+    df = pd.DataFrame(np.array(goals).reshape(len(goals)//10, 10),
+                      columns=cols)
     '''
     strip out numbers that are included with players names to denote season
     total of Goals / Assists
@@ -114,15 +99,16 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
                 .drop(['Visitor_On_Ice', 'Home_On_Ice'], axis=1)
         p_df.set_index(['Season', 'gameId']).to_csv('csv/' + ps_file,
                                                     index=True)
-    # drop rows that contain unsuccessful penalty shots
+    # drop rows that contain unsuccessful penalty shots because we only
+    # want actual goals
     df = df[df['Assist.1'] != 'Unsuccessful Penalty Shot']
 
     for team in ['Visitor', 'Home']:
         df[team + '_Goalie_On_Ice'] = df[team + '_On_Ice']\
             .apply(lambda x: any(str(g) in x for g in goalies[team])
                    if x is not None else True)
-        df[team+'_Score'] = cumsum([1 if df.loc[ei, 'Team'] == meta[team]
-                                    else 0 for ei in df.index])
+        df[team+'_Score'] = np.cumsum([1 if df.loc[ei, 'Team'] == meta[team]
+                                      else 0 for ei in df.index])
 
     df['Difference'] = [df.Home_Score[ei] - df.Visitor_Score[ei]
                         if df.Team[ei] == meta['Home']
