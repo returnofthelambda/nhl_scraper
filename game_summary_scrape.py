@@ -27,7 +27,7 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
 
     meta = {}
     if len(str(season)) == 4:
-        meta['Season'] = str(season) + str(int(season)+1)
+        meta['Season'] = str(season) + str(int(season) + 1)
     else:
         meta['Season'] = str(season)
 
@@ -41,8 +41,9 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
         except HTTPError:
             return pd.DataFrame(['Game not found.'], columns=['Err']),\
                 pd.DataFrame()
-        bs_obj = BeautifulSoup(raw_html.read().decode('utf-8'), 'html.parser')
-        tds = bs_obj.find_all('td')
+
+    bs_obj = BeautifulSoup(raw_html.read().decode('utf-8'), 'html.parser')
+    tds = bs_obj.find_all('td')
 
     times = tds[15].text.split('\xa0')
 
@@ -71,6 +72,21 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
                 team = 'Home'
 
     goals = [val.text.strip() for val in tds[28].find_all('td')[10:]]
+
+    '''
+    Penalty shots are formatted differently than any other goal, this
+    function adds an extra blank to make the goal information lines
+    consistent throughout
+    '''
+    PS = ['Penalty Shot', 'Unsuccessful Penalty Shot']
+    if any(i in PS for i in goals) > 0:
+        for pos in [i for i in range(len(goals)) if goals[i] in PS]:
+            goals.insert(pos+1, '')
+
+    if '-PS' in goals:
+        goals.append('')
+    # return goals
+
 
     cols = ['G', 'Per', 'Time', 'Str', 'Team', 'Scorer', 'Assist.1',
             'Assist.2', 'Visitor_On_Ice', 'Home_On_Ice']
@@ -123,6 +139,7 @@ def summary_scrape(season,gameId,subSeason='02',*raw_html):
 
     return df.set_index(['Season', 'gameId']), df_meta.set_index(['Season',
                                                                   'gameId'])
+
 
 def season_summary_scrape(season,start=1,subSeason='02',*autosave):
     """
