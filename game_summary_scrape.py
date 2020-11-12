@@ -1,3 +1,9 @@
+'''
+Series of functions for processing NHL Game Summary sheets and extracting
+goal data reported on the sheet with the goal of finding all goals scored
+with a goalie not on the ice, specifically with the goal to find
+delayed penalty goals.
+'''
 import os
 from datetime import datetime
 from urllib.request import urlopen, HTTPError
@@ -6,11 +12,11 @@ from bs4 import BeautifulSoup
 import pandas as pd
 
 
-def summary_scrape(season, gameId, subSeason='02', *raw_html):
+def summary_scrape(season, game_id, sub_season='02', *raw_html):
     """
     Script that scrapes goals scored data from NHL Game Summary pages. Requires
-    4 digit season (eg 2018 for the 2018-19 season), 4 digit gameId and 2 digit
-    sub season (01 preseason, 02 regular, 03 playoffs).
+    4 digit season (eg 2018 for the 2018-19 season), 4 digit game_id and
+    2 digit sub_season (01 preseason, 02 regular, 03 playoffs).
 
     """
 
@@ -21,9 +27,9 @@ def summary_scrape(season, gameId, subSeason='02', *raw_html):
         meta['Season'] = str(season)
 
     if ~('raw_html' in locals()):
-        meta['gameId'] = str(subSeason).zfill(2) + str(gameId).zfill(4)
+        meta['game_id'] = str(sub_season).zfill(2) + str(game_id).zfill(4)
         url = 'http://www.nhl.com/scores/htmlreports/' + meta['Season'] +\
-            '/GS' + meta['gameId'] + '.HTM'
+            '/GS' + meta['game_id'] + '.HTM'
         # url='http://www.nhl.com/scores/htmlreports/20132014/GS020001.HTM'
 
     try:
@@ -34,12 +40,12 @@ def summary_scrape(season, gameId, subSeason='02', *raw_html):
 
     bs_obj = BeautifulSoup(raw_html.read().decode('utf-8'), 'html.parser')
     tds = bs_obj.find_all('td')
-    meta = meta_clean(meta, tds)
+    meta = _meta_clean(meta, tds)
 
     return bs_obj, meta, tds
 
 
-def meta_clean(meta, tds):
+def _meta_clean(meta, tds):
     '''
     returns the meta data from the game being scraped.
     '''
@@ -60,12 +66,12 @@ def meta_clean(meta, tds):
 
 
 def goalie_info(bs_obj):
-    # find goalie info and use it to extract goalie numbers
-    goalie_info = bs_obj.find('td', {'valign': 'middle'}).find_parent('tr')\
+    ''' find goalie info and use it to extract goalie numbers'''
+    goalies_info = bs_obj.find('td', {'valign': 'middle'}).find_parent('tr')\
         .find_next_siblings('tr')
     team = 'Visitor'
     goalies = {'Visitor': [], 'Home': []}
-    for line in goalie_info:
+    for line in goalies_info:
         for val in line.find('td'):
             if val.isnumeric():
                 goalies[team].append(val)
@@ -74,12 +80,17 @@ def goalie_info(bs_obj):
     return goalies
 
 
-def penalty_shot(goals_df, meta):
+def _penalty_shot(goals_df, meta):
+    '''
+    Penalty shots are formatted differently than any other goal, this
+    function adds an extra blank to make the goal information lines
+    consistent throughout
+    '''
     if 'csv' not in os.listdir():
         os.mkdir('csv')
     ps_file = 'failed_ps_' + meta['Season'] + '.csv'
     if ps_file in os.listdir('csv/'):
-        p_df = pd.read_csv('csv/' + ps_file, dtype={'gameId': 'str'})
+        p_df = pd.read_csv('csv/' + ps_file, dtype={'game_id': 'str'})
         p_df = pd.concat([p_df, goals_df[goals_df[
             'Assist.1'] == 'Unsuccessful Penalty Shot'].drop([
                 'Visitor_On_Ice', 'Home_On_Ice'], axis=1)], sort=False)\
@@ -87,7 +98,7 @@ def penalty_shot(goals_df, meta):
     else:
         p_df = goals_df[goals_df['Assist.1'] == 'Unsuccessful Penalty Shot']\
             .drop(['Visitor_On_Ice', 'Home_On_Ice'], axis=1)
-    p_df.set_index(['Season', 'gameId']).to_csv('csv/' + ps_file, index=True)
+    p_df.set_index(['Season', 'game_id']).to_csv('csv/' + ps_file, index=True)
     return None
 
 
@@ -110,14 +121,9 @@ def goals_clean(bs_obj, meta, tds):
 
     goals = [val.text.strip() for val in tds[28].find_all('td')[10:]]
 
-    '''
-    Penalty shots are formatted differently than any other goal, this
-    function adds an extra blank to make the goal information lines
-    consistent throughout
-    '''
-    PS = ['Penalty Shot', 'Unsuccessful Penalty Shot']
-    if any(i in PS for i in goals) > 0:
-        for pos in [i for i in range(len(goals)) if goals[i] in PS]:
+    pen_shot = ['Penalty Shot', 'Unsuccessful Penalty Shot']
+    if any(i in pen_shot for i in goals) > 0:
+        for pos in [i for i in range(len(goals)) if goals[i] in pen_shot]:
             goals.insert(pos+1, '')
 
     if '-PS' in goals:
@@ -128,17 +134,17 @@ def goals_clean(bs_obj, meta, tds):
             'Assist.2', 'Visitor_On_Ice', 'Home_On_Ice']
     goals_df = pd.DataFrame(np.array(goals).reshape(len(goals)//10, 10),
                             columns=cols)
-    '''
-    strip out numbers that are included with players names to denote season
-    total of Goals / Assists
-    '''
+
+    # strip out numbers that are included with players names to denote season
+    # total of Goals / Assists
+
     for col in cols[5:8]:
         goals_df[col] = goals_df[col].str.replace(r'\(\d+\)|\d+',
                                                   '').str.strip()
 
-    goals_df['Season'], goals_df['gameId'] = [meta['Season'], meta['gameId']]
+    goals_df['Season'], goals_df['game_id'] = [meta['Season'], meta['game_id']]
     if any(goals_df['Assist.1'].str.contains('Unsuccessful Penalty Shot')):
-        penalty_shot(goals_df, meta)
+        _penalty_shot(goals_df, meta)
     # drop rows that contain unsuccessful penalty shots because we only
     # want actual goals
     goals_df = goals_df[goals_df['Assist.1'] != 'Unsuccessful Penalty Shot']
@@ -159,7 +165,7 @@ def goals_clean(bs_obj, meta, tds):
     goals_df['Time'] = pd.to_datetime(goals_df.Time, format='%M:%S',
                                       errors='coerce').dt.time
 
-    return goals_df.set_index(['Season', 'gameId'])
+    return goals_df.set_index(['Season', 'game_id'])
 
 
 def missing_game(game_id, failed):
@@ -167,33 +173,33 @@ def missing_game(game_id, failed):
     Function for handling increment after reaching a missing game
     game_id is a string
     '''
+    count = int(game_id[-4:]) + 1
     print('Unable to find:', game_id)
-    if int(game_id[-4:]) == failed + 1:
-        if (game_id[6] == '3') & (int(game_id[8]) < 5):
+    if count == failed + 2:
+        if (game_id[5] == '3') & (int(game_id[7]) < 5):
             # 2018-2019 playoffs count handling
             # increment to next hundreds place
-            count = (int(game_id[-4:]/100)+1) * 100 + 11
-            return count, count - 1
+            count = (int(game_id[-4:])//100+1) * 100 + 11
         else:
-            return None,
+            count = None
     else:
-        if game_id[:2] == '03':
-            if game_id[-4:] < 111:
-                count = 110
+        if game_id[4:6] == '03':
+            if int(game_id[-4:]) < 111:
+                count = 111
             else:
                 # increment to next tens place
-                count = (int(game_id[-4:]/10) + 1) * 10
-            return count + 1, count
+                count = (int(game_id[-4:])//10 + 1) * 10 + 1
+    return count
 
 
-def season_summary_scrape(season, start=1, subSeason='02', *autosave):
+def season_summary_scrape(season, start=1, sub_season='02', *autosave):
     """
     User provides season number and optionally the starting game, and returns a
     dataframe of summary data for all games from start to final game of the
     season. Start defaults to 0 if no input is provided by the user.
     The reason I set the loop to not break until two consecutive games are
     empty is because if a game is postponed for any reason (weather, etc) the
-    NHL keeps that gameId number for the postponed game, and often those games
+    NHL keeps that game_id number for the postponed game, and often those games
     are made up at the end of the season. If two consecutive games are ever
     postponed (and I'm sure at some point that will happen) I will have to
     revisit how to handle this.
@@ -216,39 +222,39 @@ def season_summary_scrape(season, start=1, subSeason='02', *autosave):
     season_gs_df, season_gs_meta_df = pd.DataFrame(), pd.DataFrame()
     i = int(start)
     while True:
-        # gameId = '%04d' % i
-        game_id = str(subSeason).zfill(2) + '%04d' % i
-        bs_obj, meta, tds = summary_scrape(str(season), game_id[2:], subSeason)
+        # game_id = '%04d' % i
+        game_id = str(sub_season).zfill(2) + '%04d' % i
+        bs_obj, meta, tds = summary_scrape(str(season), game_id[2:],
+                                           sub_season)
         if tds is None:
-            i, failed = missing_game(season[:4]+str(subSeason)+str(game_id),
-                                     failed)
-            if i is None:
+            i = missing_game(season[:4]+str(game_id), failed)
+            if i is not None:
+                failed = i - 1
+                continue
+            else:
                 break
-            else:
-                continue
-        else:
-            print('Scraping game ' + str(season[:4]) + game_id)
-            meta_df = pd.DataFrame(meta)
 
-            if meta_df.columns[0] == 'Err':
-                print(meta_df.Err.iloc[0])
-                skipped.append([season, game_id, 'In Progress / Missing',
-                                datetime.fromtimestamp(datetime.timestamp(
-                                    datetime.now())).strftime(
-                                        '%Y-%m-%d %H:%M:%S')])
-                i += 1
-                continue
-            else:
-                meta_df.set_index(['Season', 'gameId'], inplace=True)
-                goals_df = goals_clean(bs_obj, meta, tds)
+        print('Scraping game ' + str(season[:4]) + game_id)
+        meta_df = pd.DataFrame(meta)
+        i += 1
 
+        if meta_df.columns[0] == 'Err':
+            print(meta_df.Err.iloc[0])
+            skipped.append([season, game_id, 'In Progress / Missing',
+                            datetime.fromtimestamp(datetime.timestamp(
+                                datetime.now())).strftime(
+                                    '%Y-%m-%d %H:%M:%S')])
+            continue
 
-            season_gs_df = season_gs_df.append(goals_df, ignore_index=False)
-            season_gs_meta_df = season_gs_meta_df.append(meta_df,
-                                                         ignore_index=False)
-            i += 1
+        meta_df.set_index(['Season', 'game_id'], inplace=True)
+        goals_df = goals_clean(bs_obj, meta, tds)
+
+        season_gs_df = season_gs_df.append(goals_df, ignore_index=False)
+        season_gs_meta_df = season_gs_meta_df.append(meta_df,
+                                                     ignore_index=False)
+
     if (len(skipped) > 2) & autosave:
-        pd.DataFrame(skipped[:-2], columns=['Season', 'gameId', 'Reason',
+        pd.DataFrame(skipped[:-2], columns=['Season', 'game_id', 'Reason',
                                             'Time Failed']).to_csv(
                                                 'skipped_' + str(season) +
                                                 '.csv', index=False)
@@ -259,91 +265,24 @@ def season_summary_scrape(season, start=1, subSeason='02', *autosave):
 
     return season_gs_df, season_gs_meta_df
 
+
 def ss_df_import(season=2008):
-    df, dfm = pd.DataFrame(), pd.DataFrame()
+    '''
+    Starts with 'season' and cycles through the current seasons to import saved
+    dataframes. Assumes multiple dataframes are already saved using the
+    default naming convention.
+    '''
+    season_df, meta_df = pd.DataFrame(), pd.DataFrame()
 
     for szn in range(season, 2019):
-        df = df.append(pd.read_csv('csv\ss_' + str(szn) + str(szn + 1) +
-                                   '.csv', dtype={'gameId': 'str'
-                                                  }).set_index(['Season',
-                                                                'gameId']),
-                       sort=False)
-        dfm = dfm.append(pd.read_csv('csv\ss_' + str(szn) + str(szn + 1) +
-                                     '_meta.csv', dtype={'gameId': 'str'})
-                         .set_index(['Season', 'gameId']), sort=False)
+        season_df = season_df.append(pd.read_csv(r'csv\ss_' + str(szn) +
+                                                 str(szn + 1) + '.csv',
+                                                 dtype={'game_id': 'str'})
+                                     .set_index(['Season', 'game_id']),
+                                     sort=False)
+        meta_df = meta_df.append(pd.read_csv(r'csv\ss_' + str(szn) +
+                                             str(szn + 1) + '_meta.csv',
+                                             dtype={'game_id': 'str'})
+                                 .set_index(['Season', 'game_id']), sort=False)
 
-    return df, dfm
-
-def sss1(season,start=1,subSeason='02',*autosave):
-    """
-    Update, 2020-11-01: not currently working for a full season. Use
-    season_summary_scrape listed above.
-
-    Function that is similar to the season_summary_scrape function above, but
-    replaces loops with recursive functions.
-    """
-
-    def autosave_check():
-        text = input('Would you like to save to csv (Y/n)? ')[0]
-        if (text.upper()=='Y') | (text.upper()=='N'):
-            return text.upper() == 'Y'
-        else:
-            print('Please enter Y/n.')
-            return autosave_check()
-
-    autosave = autosave_check()
-
-    gId = str(season) + str(int(season) + 1) + str(subSeason).zfill(2) +\
-        str(start).zfill(4) if len(str(season)) == 4 else str(season) +\
-        str(subSeason).zfill(2) + str(start).zfill(4)
-
-    print(gId)
-    def gss(gId,gs_df,gs_meta_df,skipped,failed):
-        try:
-            raw_html = urlopen('http://www.nhl.com/scores/htmlreports/' +
-                               gId[:8] + '/GS' + gId[-6:] + '.HTM')
-        except:
-            print('Unable to find: ' + str(gId)[:4] + str(gId)[-6:])
-            if gId == str(int(failed) + 1):
-                if (skipped.shape[0] > 2) & (autosave):
-                    skipped.columns = ['Season', 'gameId', 'Reason',
-                                       'Time Failed']
-                    skipped.to_csv('skipped_' + gId[:8] + '.csv', index=False)
-                return gs_df, gs_meta_df
-            else:
-                return gss(str(int(gId) + 1), gs_df, gs_meta_df,
-                           skipped.append(pd.DataFrame(
-                               [gId[:8], gId[-6:],'DNE',
-                                datetime.fromtimestamp(datetime.timestamp(
-                                    datetime.now())).strftime(
-                                        '%Y-%m-%d %H:%M:%S')]).T), gId)
-        print('Scraping game ' + gId[:4] + gId[8:])
-
-        df_tmp, game_meta = summary_scrape(gId[:4], gId[-4:], gId[8:10],
-                                         raw_html)
-        if df_tmp.columns[0] == 'Err':
-            print(df_tmp.Err.iloc[0])
-            if gId == str(int(failed) + 1):
-                return gs_df, gs_meta_df
-            else:
-                return gss(str(int(gId) + 1), gs_df, gs_meta_df,
-                           skipped.append(pd.DataFrame(
-                               [gId[:8], gId[8:], 'In Progress',
-                                datetime.fromtimestamp(datetime.timestamp(
-                                    datetime.now())).strftime(
-                                        '%Y-%m-%d %H:%M:%S')]).T), gId)
-        else:
-            return gss(str(int(gId) + 1), gs_df.append(df_tmp,
-                                                       ignore_index=False),
-                       gs_meta_df.append(game_meta, ignore_index=False), skipped,
-                       failed)
-
-    season_gs_df, season_gs_meta_df = gss(gId, pd.DataFrame(), pd.DataFrame(),
-                                          pd.DataFrame(), 0)
-
-    if autosave:
-        season_gs_df.to_csv('ss_' + str(gId)[:8] + '.csv', index=True)
-        season_gs_meta_df.to_csv('ss_' + str(gId)[:8] + '_meta.csv',
-                                 index=True)
-
-    return season_gs_df, season_gs_meta_df
+    return season_df, meta_df
